@@ -1,4 +1,56 @@
 #!/usr/bin/make -f
 
+#export DH_VERBOSE=1
+
+# The command 'sphinx-build' refers to the python2 version;
+# currently there is no easier way to refer to the python3 version.
+SPHINXBUILD=/usr/share/sphinx/scripts/python3/sphinx-build
+
+# Full hardening for the cython build.
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all
+
+# pybuild: use pytest instead of auto-detection
+#
+# The autodetection failed on jessie, resulting in a failed
+# build, since unittest does not support pytest's command
+# line switches
+export PYBUILD_TEST_PYTEST=1
+
+# To display coverage information, add the following
+# switches to PYBUILD_TEST_ARGS (Upstream does this)
+#
+# Note that this currently breaks unittests on jessie,
+# because borg will trip over the unexpected coverage
+# files.  Since this failure does not occur in stretch,
+# this is likely due to an outdated version in jessie.
+#
+# --cov=borg --cov-config=../.coveragerc
+
 %:
-	dh $@
+	dh $@ --with python3,sphinxdoc --buildsystem=pybuild
+
+override_dh_installdocs:
+	python3 setup.py build_ext --inplace
+	$(MAKE) -C docs html SPHINXBUILD=$(SPHINXBUILD)
+	dh_installdocs
+
+override_dh_installman:
+	python3 setup.py build_ext --inplace
+	$(MAKE) -C docs man SPHINXBUILD=$(SPHINXBUILD)
+	dh_installman
+
+# We run most of the tests in fakeroot to increase test coverage, but fakeroot
+# introduces race conditions on its own.
+TESTS_NO_FAKEROOT = benchmark.py cache.py checks.py key.py locking.py patterns.py remote.py repository.py shellpattern.py
+override_dh_auto_test: export TZ=UTC # tests break in TZ=GMT+12, see https://github.com/borgbackup/borg/issues/5535
+override_dh_auto_test: export LC_ALL=C.UTF-8
+override_dh_auto_test:
+	# fakeroot introduces race conditions to e.g. locking tests.
+	dh_auto_test -- --test-args "--pyargs borg.testsuite -k '$(subst $(eval) $(eval), or ,$(TESTS_NO_FAKEROOT))'"
+	# We cannot rely on the buildds allowing fuse to be
+	# used, so we disable the fuse-mount tests.
+	fakeroot dh_auto_test -- --test-args "--pyargs borg.testsuite -k 'not fuse_mount and not test_fuse and not test_readonly_mount and not test_migrate_lock_alive $(foreach t,$(TESTS_NO_FAKEROOT),and not $(t))'"
+
+# Do not compress .ico file (affects html documentation)
+override_dh_compress:
+	dh_compress -X.ico -Xfonts

@@ -1,0 +1,117 @@
+borgbackup (1.2.8-1) unstable; urgency=high
+
+  **** Important notice ****
+    - Fix for CVE-2023-36811
+  **** Please follow the upgrade procedure below to avoid any risk of data
+    loss!!! ****
+    A flaw in the cryptographic authentication scheme in Borg allowed an attacker to
+    fake archives and potentially indirectly cause backup data loss in the repository.
+
+    The attack requires an attacker to be able to
+
+      1. insert files (with no additional headers) into backups
+      2. gain write access to the repository
+
+    This vulnerability does not disclose plaintext to the attacker, nor does it
+    affect the authenticity of existing archives.
+
+    Creating plausible fake archives may be feasible for empty or small archives,
+    but is unlikely for large archives.
+
+    The fix enforces checking the TAM authentication tag of archives at critical
+    places. Borg now considers archives without TAM as garbage or an attack.
+
+    We are not aware of others having discovered, disclosed or exploited this vulnerability.
+
+    Below, if we speak of borg 1.2.8, we mean a borg version >= 1.2.8 **or** a
+    borg version that has the relevant security patches for this vulnerability applied
+    (could be also an older version in that case).
+
+    Steps you must take to upgrade a repository (this applies to all kinds of repos no
+    matter what encryption mode they use, including “none”):
+
+      1. Upgrade all clients using this repository to borg 1.2.8. Note: it is not
+         required to upgrade a server, except if the server-side borg is also used as a
+         client (and not just for “borg serve”).
+
+         Do *not* run `borg check` with borg > 1.2.4 before completing the upgrade steps:
+
+           * borg check would complain about archives without a valid archive TAM.
+           * borg check --repair would remove such archives!
+
+      2. Do this step on every client using this repo:
+
+         # borg upgrade --show-rc --check-tam <repo>
+
+         This will check the manifest TAM authentication setup in the repo and on this
+         client. The command will exit with rc=0 if all is OK, otherwise with rc=1.
+
+           a. If you get “Manifest authentication setup OK for this client and this
+              repository.” and rc=0, continue with 3.
+           b. If you get some warnings and rc=1, run:
+              # borg upgrade --tam --force <repository>
+
+      3. Run:
+
+         # borg upgrade --show-rc --check-archives-tam <repo>
+
+         This will create a report about the TAM status for all archives. In the last
+         line(s) of the report, it will also report the overall status. The command
+         will exit with rc=0 if all archives are TAM authenticated or with rc=1 if
+         there are some archives with TAM issues.
+
+         If there are no issues and all archives are TAM authenticated, continue with 5.
+
+         Archive TAM issues are expected for:
+
+           * archives created by borg <1.0.9.
+           * archives resulting from a borg rename or borg recreate operation (see #7791)
+
+         But, important, archive TAM issues could also come from archives created by
+         an attacker. You should verify that archives with TAM issues are authentic
+         and not malicious (== have good content, have correct timestamp, can be
+         extracted successfully). In case you find crappy/malicious archives, you must
+         delete them before proceeding.
+
+         In low-risk, trusted environments, you may decide on your own risk to skip
+         step 3 and just trust in everything being OK.
+
+      4. If there are no archives with TAM issues left at this point, you can skip this step.
+
+         Run: # borg upgrade --archives-tam <repo>
+
+         This will unconditionally add a correct archive TAM to all archives not
+         having one. borg check would consider TAM-less or invalid-TAM archives as
+         garbage or a potential attack.
+
+         To see that all archives are OK now, you can optionally repeat the command
+         from step 3.
+
+      5. Done. Manifest and archives are TAM authenticated now.
+
+    Vulnerability time line:
+
+      * 2023-06-13:  Vulnerability discovered during code review by Thomas Waldmann
+      * 2023-06-13…: Work on fixing the issue, upgrade procedure, docs.
+      * 2023-06-30:  CVE was assigned via Github CNA
+      * 2023-06-30…2023-08-29: Fixed issue, code review, docs, testing.
+      * 2023-08-30: Released fixed version 1.2.5 (broken upgrade procedure for some repos)
+      * 2023-08-31:  Released fixed version 1.2.6 (fixes upgrade procedure)
+  (Source: upstream docs/changes.rst, formatted for plain-text clarity)
+
+  * Note: borg supports the "compact" feature!
+    - compact: "borg compact" needs to be used to free repository space by
+      compacting the segments (reading sparse segments, rewriting still needed
+      data to new segments, deleting the sparse segments).
+      Borg < 1.2 invoked compaction automatically at the end of each repository
+      writing command.
+      Borg >= 1.2 does not do that any more to give better speed, more control,
+      more segment file stability (== less stuff moving to newer segments) and
+      more robustness.
+      See the docs about "borg compact" for more details.
+    - "borg compact --cleanup-commits" is to cleanup the tons of 17byte long
+      commit-only segment files caused by borg 1.1.x issue #2850.
+      Invoke this once after upgrading (the server side) borg to 1.2.
+      Compaction now automatically removes unneeded commit-only segment files.
+
+ -- Nicholas D Steeves <sten@debian.org>  Sun, 15 Jun 2025 11:17:33 -0400
